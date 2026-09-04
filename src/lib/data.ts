@@ -1,4 +1,14 @@
-import type { ReactNode } from "react";
+import type { ReactNode, ComponentType, SVGProps } from "react";
+import {
+  Cloud,
+  Server,
+  Network,
+  Code2,
+  BrainCircuit,
+  Workflow,
+  Database,
+  ShieldCheck,
+} from "lucide-react";
 
 export const projects = [
   {
@@ -65,45 +75,60 @@ export const certifications = [
   { name: "AWS Cloud Practitioner", issuer: "Amazon Web Services", status: "planned", progress: 5 },
 ];
 
-export const skillCategories = [
+type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
+
+export const skillCategories: {
+  title: string;
+  color: string;
+  icon: IconComponent;
+  skills: string[];
+}[] = [
   {
     title: "Cloud & Virtualization",
     color: "#8b5cf6",
+    icon: Cloud,
     skills: ["Docker", "Docker Compose", "Portainer", "Coolify", "KVM/QEMU", "Unraid"],
   },
   {
     title: "Systems Administration",
     color: "#3b82f6",
+    icon: Server,
     skills: ["Unraid", "Self-Hosted Apps", "Web Hosting", "Windows Admin", "Linux Admin", "Log Analysis"],
   },
   {
     title: "Networking",
     color: "#22d3ee",
+    icon: Network,
     skills: ["TCP/IP", "Container Networking", "Docker Net Config", "DNS", "Cloudflare Tunnels"],
   },
   {
     title: "Software & Web",
     color: "#ec4899",
+    icon: Code2,
     skills: ["WordPress", "Elementor", "ACF", "HTML/CSS", "PHP", "Next.js"],
   },
   {
     title: "AI & Automation Tools",
     color: "#a855f7",
+    icon: BrainCircuit,
     skills: ["Ollama (Local LLM)", "AI-Assisted Dev", "ComfyUI", "OpenCode CLI"],
   },
   {
     title: "Scripting & DevOps",
     color: "#10b981",
+    icon: Workflow,
     skills: ["YAML Config", "Git", "GitHub Workflows", "CI/CD Pipelines"],
   },
   {
     title: "Databases",
     color: "#06b6d4",
+    icon: Database,
     skills: ["MySQL/MariaDB", "PostgreSQL", "Database Troubleshooting"],
   },
   {
     title: "Cybersecurity",
     color: "#f59e0b",
+    icon: ShieldCheck,
     skills: ["Network Security", "Access Control", "CompTIA A+ (Studying)", "SIEM Concepts"],
   },
 ];

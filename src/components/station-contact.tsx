@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Mail, Send, MessageSquare, CheckCircle, Globe, GitHub, Linkedin } from "lucide-react";
+import { Mail, Send, MessageSquare, CheckCircle, Globe } from "lucide-react";
 import { GithubIcon as Github, LinkedinIcon as Linkedin } from "@/components/icons";
 import { useState, useEffect, forwardRef, useImperativeHandle, useRef } from "react";
 
@@ -16,7 +16,7 @@ export interface ContactHandle {
   prefill: (data: { name: string; email: string; message: string }) => void;
 }
 
-export const Contact = forwardRef<ContactHandle>(function Contact(_props, ref) {
+export const StationContact = forwardRef<ContactHandle>(function StationContact(_props, ref) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [name, setName] = useState("");
@@ -240,3 +240,4 @@ export const Contact = forwardRef<ContactHandle>(function Contact(_props, ref) {
     </section>
   );
 }
+);

@@ -66,8 +66,10 @@ export function StationCertifications() {
                     </div>
                     <Badge variant="outline" className="text-xs">
                       {cert.status === "in-progress" ? (
-                        <Clock className="h-3 w-3 mr-1" />
-                        In Progress
+                        <span className="flex items-center">
+                          <Clock className="h-3 w-3 mr-1" />
+                          In Progress
+                        </span>
                       ) : (
                         "Planned"
                       )}
