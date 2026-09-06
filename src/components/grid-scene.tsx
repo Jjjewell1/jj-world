@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, useEffect, useCallback, useSyncExternalStore
 import type { ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Text, Grid, Points, PointMaterial } from "@react-three/drei";
+import { EffectComposer, Bloom, Vignette } from "@react-three/postprocessing";
 import { motion, AnimatePresence } from "framer-motion";
 import * as THREE from "three";
 import {
@@ -31,22 +32,35 @@ const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
 type StationNum = 1 | 2 | 3 | 4;
 type Vec3 = [number, number, number];
 type Project = (typeof projects)[number];
+type Cert = (typeof certifications)[number];
+type HoverInfo =
+  | { kind: "project"; project: Project }
+  | { kind: "cert"; cert: Cert }
+  | null;
 
 const STATION_TOTAL = 4;
 
+// All stations framed closer so the 3D objects (and their WebGL labels) read
+// larger on screen; the camera damping does the rest.
 const CAMERA_POS: Record<StationNum, Vec3> = {
-  1: [0, 1.6, 7.5],
-  2: [0, 2.0, 8.2],
-  3: [0, 2.1, 8.5],
-  4: [0, 1.8, 7.9],
+  1: [0, 1.7, 5.6],
+  2: [0, 2.0, 6.6],
+  3: [0, 1.9, 4.6],
+  4: [0, 1.7, 5.3],
 };
 
 const CAMERA_LOOKAT: Record<StationNum, Vec3> = {
   1: [0, 1.6, -1.5],
-  2: [0, 2.2, -2.2],
-  3: [0, 2.2, -3.0],
-  4: [0, 1.75, -2.5],
+  2: [0, 2.25, -2.2],
+  3: [0, 1.6, -2.7],
+  4: [0, 1.25, -2.4],
 };
+
+// Single source of truth for the monitor rack layout. Kept in sync with the
+// ProjectionReporter so E2E pixel-coordinate tests never drift.
+const MONITOR_SPACING = 2.5;
+const MONITOR_Y = 2.25;
+const MONITOR_Z = -2.3;
 
 const STATION_LABEL: Record<StationNum, string> = {
   1: "ENTRY // SERVER CORE",
@@ -87,8 +101,6 @@ function useLowPower(): boolean {
   };
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
 }
-
-/** Toggle the OS cursor while hovering an interactive 3D object. */
 
 /* ------------------------------------------------------------------ */
 /* Camera rig: damped movement between fixed viewpoints                */
@@ -229,21 +241,21 @@ function ServerCore({ lowPower }: { lowPower: boolean }) {
     <group position={[0, 1.6, -3]}>
       {/* chassis of stacked servers */}
       <mesh position={[0, -0.55, 0]}>
-        <boxGeometry args={[1.5, 1.1, 1.1]} />
+        <boxGeometry args={[1.7, 1.2, 1.2]} />
         <meshStandardMaterial color={DARK} metalness={0.55} roughness={0.35} />
       </mesh>
       <mesh position={[0, 0.28, 0]}>
-        <boxGeometry args={[1.15, 0.55, 1.15]} />
+        <boxGeometry args={[1.35, 0.62, 1.35]} />
         <meshStandardMaterial color="#0a1220" metalness={0.5} roughness={0.3} />
       </mesh>
       {/* wireframe cage */}
       <mesh>
-        <boxGeometry args={[1.9, 1.9, 1.9]} />
+        <boxGeometry args={[2.2, 2.2, 2.2]} />
         <meshBasicMaterial color="#0f3d" wireframe transparent opacity={0.35} />
       </mesh>
       {/* the core */}
       <mesh>
-        <icosahedronGeometry args={[0.55, 1]} />
+        <icosahedronGeometry args={[0.62, 1]} />
         <meshStandardMaterial
           ref={coreMat}
           color="#101820"
@@ -254,20 +266,20 @@ function ServerCore({ lowPower }: { lowPower: boolean }) {
         />
       </mesh>
       <mesh ref={ringA}>
-        <torusGeometry args={[1.15, 0.018, 8, 64]} />
+        <torusGeometry args={[1.35, 0.02, 8, 64]} />
         <meshBasicMaterial color={TEAL} transparent opacity={0.8} />
       </mesh>
       <mesh ref={ringB} rotation={[Math.PI / 2.4, 0, 0]}>
-        <torusGeometry args={[1.45, 0.015, 8, 64]} />
+        <torusGeometry args={[1.7, 0.016, 8, 64]} />
         <meshBasicMaterial color={AMBER} transparent opacity={0.7} />
       </mesh>
       {!lowPower && (
         <>
-          <GlowDisc position={[0, 0, -0.7]} color={TEAL} scale={2.6} opacity={0.14} />
-          <GlowDisc position={[0, 0, 0]} color={AMBER} scale={1.4} opacity={0.08} />
+          <GlowDisc position={[0, 0, -0.8]} color={TEAL} scale={3.0} opacity={0.14} />
+          <GlowDisc position={[0, 0, 0]} color={AMBER} scale={1.6} opacity={0.08} />
         </>
       )}
-      <Text position={[0, -1.55, 0]} fontSize={0.09} font="/fonts/JetBrainsMono-Regular.ttf" color="#38e0a8" anchorX="center">
+      <Text position={[0, -1.55, 0]} fontSize={0.14} font="/fonts/JetBrainsMono-Regular.ttf" color="#38e0a8" anchorX="center">
         SERVER_CORE // v0.1
       </Text>
     </group>
@@ -282,19 +294,20 @@ function ProjectMonitor({
   project,
   index,
   onOpen,
+  onHover,
 }: {
   project: Project;
   index: number;
   onOpen: (p: Project) => void;
+  onHover: (h: { kind: "project"; project: Project } | null) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const screenMat = useRef<THREE.MeshStandardMaterial>(null);
-  const x = (index - 2) * 2.5;
+  const x = (index - 2) * MONITOR_SPACING;
   return (
-    <group position={[x, 2.25, -2.3]}>
+    <group position={[x, MONITOR_Y, MONITOR_Z]}>
       {/* floor pedestal */}
       <mesh position={[0, -1.55, 0.1]}>
-        <boxGeometry args={[0.9, 1.2, 0.5]} />
+        <boxGeometry args={[1.05, 1.25, 0.5]} />
         <meshStandardMaterial color="#05080f" metalness={0.4} roughness={0.6} />
       </mesh>
       <group
@@ -307,60 +320,61 @@ function ProjectMonitor({
           e.stopPropagation();
           document.body.style.cursor = "pointer";
           setHovered(true);
+          onHover({ kind: "project", project });
         }}
         onPointerOut={() => {
           document.body.style.cursor = "auto";
           setHovered(false);
+          onHover(null);
         }}
       >
         {/* chassis */}
         <mesh>
-          <boxGeometry args={[1.55, 1.05, 0.16]} />
+          <boxGeometry args={[1.8, 1.24, 0.2]} />
           <meshStandardMaterial color={hovered ? "#12202c" : "#0a1018"} metalness={0.5} roughness={0.32} />
         </mesh>
         {/* status led */}
-        <mesh position={[0.66, 0.44, 0.09]}>
-          <sphereGeometry args={[0.045, 12, 12]} />
-          <meshStandardMaterial color={project.featured ? AMBER : "#3a4657"} emissive={project.featured ? AMBER : "#3a4657"} emissiveIntensity={hovered ? 2 : 1} />
+        <mesh position={[0.76, 0.51, 0.11]}>
+          <sphereGeometry args={[0.055, 12, 12]} />
+          <meshStandardMaterial color={project.featured ? AMBER : "#3a4657"} emissive={project.featured ? AMBER : "#3a4657"} emissiveIntensity={hovered ? 2.4 : 1.1} />
         </mesh>
         {/* screen */}
-        <mesh position={[0, 0, 0.09]}>
-          <planeGeometry args={[1.42, 0.9]} />
+        <mesh position={[0, 0, 0.11]}>
+          <planeGeometry args={[1.66, 1.06]} />
           <meshStandardMaterial
-            ref={screenMat}
             color="#03060d"
             emissive={TEAL}
-            emissiveIntensity={hovered ? 0.55 : 0.28}
+            emissiveIntensity={hovered ? 0.6 : 0.3}
             roughness={0.6}
             metalness={0.1}
           />
         </mesh>
         <Text
-          position={[0, 0.2, 0.1]}
-          fontSize={0.105}
+          position={[0, 0.24, 0.12]}
+          fontSize={0.2}
           font="/fonts/JetBrainsMono-Regular.ttf"
           color="#f2fffa"
           anchorX="center"
           anchorY="middle"
-          maxWidth={1.3}
+          maxWidth={1.5}
           textAlign="center"
         >
           {project.title}
         </Text>
         <Text
-          position={[0, -0.24, 0.1]}
-          fontSize={0.065}
+          position={[0, -0.26, 0.12]}
+          fontSize={0.11}
           font="/fonts/JetBrainsMono-Regular.ttf"
           color={project.featured ? AMBER : TEAL}
           anchorX="center"
           anchorY="middle"
-          maxWidth={1.32}
+          maxWidth={1.55}
         >
           {project.subtitle}
         </Text>
         <Text
-          position={[0, -0.42, 0.1]}
-          fontSize={0.05}
+          position={[0, -0.46, 0.12]}
+          fontSize={0.07}
           font="/fonts/JetBrainsMono-Regular.ttf"
           color="#5c7a6f"
           anchorX="center"
@@ -373,18 +387,18 @@ function ProjectMonitor({
   );
 }
 
-function ProjectRack({ onOpen }: { onOpen: (p: Project) => void }) {
+function ProjectRack({ onOpen, onHover }: { onOpen: (p: Project) => void; onHover: (h: { kind: "project"; project: Project } | null) => void }) {
   return (
     <group>
       {/* rack spine rail behind the monitors */}
-      <mesh position={[0, 1.6, -2.6]}>
-        <boxGeometry args={[13, 4, 0.22]} />
+      <mesh position={[0, 1.7, -2.62]}>
+        <boxGeometry args={[14, 4.6, 0.22]} />
         <meshStandardMaterial color="#04070d" metalness={0.5} roughness={0.5} />
       </mesh>
       {projects.map((p, i) => (
-        <ProjectMonitor key={p.title} project={p} index={i} onOpen={onOpen} />
+        <ProjectMonitor key={p.title} project={p} index={i} onOpen={onOpen} onHover={onHover} />
       ))}
-      <Text position={[0, 0.55, -2.2]} fontSize={0.085} font="/fonts/JetBrainsMono-Regular.ttf" color="#3f5a4f" anchorX="center">
+      <Text position={[0, 0.52, -2.42]} fontSize={0.12} font="/fonts/JetBrainsMono-Regular.ttf" color="#3f5a4f" anchorX="center">
         ROOT://PROJECTS — 5 VOLUMES ATTACHED
       </Text>
     </group>
@@ -395,7 +409,7 @@ function ProjectRack({ onOpen }: { onOpen: (p: Project) => void }) {
 /* Station 3: certification status rack                                */
 /* ------------------------------------------------------------------ */
 
-function CertSlot({ cert, row }: { cert: (typeof certifications)[number]; row: number }) {
+function CertSlot({ cert, row, onHover }: { cert: Cert; row: number; onHover: (h: { kind: "cert"; cert: Cert } | null) => void }) {
   const y = 3.62 - row * 0.42;
   const active = cert.status === "in-progress";
   const ledMat = useRef<THREE.MeshStandardMaterial>(null);
@@ -407,71 +421,83 @@ function CertSlot({ cert, row }: { cert: (typeof certifications)[number]; row: n
   return (
     <group position={[0, y, 0.3]}>
       {/* slot plate */}
-      <mesh>
-        <boxGeometry args={[4.6, 0.3, 0.14]} />
-        <meshStandardMaterial color="#080d15" metalness={0.5} roughness={0.4} />
-      </mesh>
-      {/* status LED */}
-      <mesh position={[-2.15, 0, 0.09]}>
-        <sphereGeometry args={[0.09, 14, 14]} />
-        <meshStandardMaterial
-          ref={ledMat}
-          color={active ? AMBER : "#1f2733"}
-          emissive={active ? AMBER : "#1f2733"}
-          emissiveIntensity={active ? 1 : 0.25}
-        />
-      </mesh>
-      {/* name */}
-      <Text
-        position={[-1.7, 0, 0.09]}
-        fontSize={0.085}
-        font="/fonts/JetBrainsMono-Regular.ttf"
-        color={active ? "#ffe9de" : "#9fb4c7"}
-        anchorX="left"
-        anchorY="middle"
-        maxWidth={2.5}
+      <group
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          document.body.style.cursor = "pointer";
+          onHover({ kind: "cert", cert });
+        }}
+        onPointerOut={() => {
+          document.body.style.cursor = "auto";
+          onHover(null);
+        }}
       >
-        {cert.name}
-      </Text>
-      {/* progress track */}
-      <mesh position={[1.25, 0, 0.05]}>
-        <boxGeometry args={[2.3, 0.045, 0.02]} />
-        <meshStandardMaterial color="#121823" />
-      </mesh>
-      {/* progress fill */}
-      <mesh position={[-0.1 + (cert.progress / 100) * 1.15, 0, 0.08]}>
-        <boxGeometry args={[(cert.progress / 100) * 2.3, 0.07, 0.03]} />
-        <meshStandardMaterial color={barColor} emissive={barColor} emissiveIntensity={active ? 1.1 : 0.25} />
-      </mesh>
-      {/* status text */}
-      <Text
-        position={[2.62, 0, 0.09]}
-        fontSize={0.06}
-        font="/fonts/JetBrainsMono-Regular.ttf"
-        color={active ? TEAL : "#5d6f80"}
-        anchorX="right"
-        anchorY="middle"
-      >
-        {cert.status.toUpperCase()}
-      </Text>
+        <mesh>
+          <boxGeometry args={[4.95, 0.34, 0.16]} />
+          <meshStandardMaterial color="#080d15" metalness={0.5} roughness={0.4} />
+        </mesh>
+        {/* status LED */}
+        <mesh position={[-2.25, 0, 0.1]}>
+          <sphereGeometry args={[0.11, 14, 14]} />
+          <meshStandardMaterial
+            ref={ledMat}
+            color={active ? AMBER : "#1f2733"}
+            emissive={active ? AMBER : "#1f2733"}
+            emissiveIntensity={active ? 1 : 0.25}
+          />
+        </mesh>
+        {/* name */}
+        <Text
+          position={[-1.85, 0, 0.1]}
+          fontSize={0.125}
+          font="/fonts/JetBrainsMono-Regular.ttf"
+          color={active ? "#ffe9de" : "#9fb4c7"}
+          anchorX="left"
+          anchorY="middle"
+          maxWidth={2.7}
+        >
+          {cert.name}
+        </Text>
+        {/* progress track */}
+        <mesh position={[1.42, 0, 0.06]}>
+          <boxGeometry args={[2.4, 0.05, 0.02]} />
+          <meshStandardMaterial color="#121823" />
+        </mesh>
+        {/* progress fill */}
+        <mesh position={[0.02 + (cert.progress / 100) * 1.2, 0, 0.09]}>
+          <boxGeometry args={[(cert.progress / 100) * 2.4, 0.08, 0.03]} />
+          <meshStandardMaterial color={barColor} emissive={barColor} emissiveIntensity={active ? 1.1 : 0.25} />
+        </mesh>
+        {/* status text */}
+        <Text
+          position={[2.85, 0, 0.1]}
+          fontSize={0.09}
+          font="/fonts/JetBrainsMono-Regular.ttf"
+          color={active ? TEAL : "#5d6f80"}
+          anchorX="right"
+          anchorY="middle"
+        >
+          {cert.status.toUpperCase()}
+        </Text>
+      </group>
     </group>
   );
 }
 
-function CertRack() {
+function CertRack({ onHover }: { onHover: (h: { kind: "cert"; cert: Cert } | null) => void }) {
   return (
     <group position={[0, 0.16, -2.8]}>
       {/* rack chassis */}
       <mesh position={[0, 2.42, 0]}>
-        <boxGeometry args={[5.0, 3.55, 0.42]} />
+        <boxGeometry args={[5.6, 3.7, 0.46]} />
         <meshStandardMaterial color="#05080e" metalness={0.55} roughness={0.42} />
       </mesh>
       {certifications.map((c, i) => (
-        <CertSlot key={c.name} cert={c} row={i} />
+        <CertSlot key={c.name} cert={c} row={i} onHover={onHover} />
       ))}
       <Text
         position={[0, -0.75, 0.1]}
-        fontSize={0.08}
+        fontSize={0.11}
         font="/fonts/JetBrainsMono-Regular.ttf"
         color="#3f5a4f"
         anchorX="center"
@@ -517,24 +543,24 @@ function ContactTerminal({ onOpen }: { onOpen: () => void }) {
           document.body.style.cursor = "auto";
           setHovered(false);
         }}
-        scale={hovered ? 1.04 : 1}
+        scale={hovered ? 1.05 : 1}
       >
         <mesh>
-          <boxGeometry args={[2.5, 1.55, 0.68]} />
+          <boxGeometry args={[2.9, 1.7, 0.72]} />
           <meshStandardMaterial color={hovered ? "#131f2b" : "#0a1018"} metalness={0.45} roughness={0.35} />
         </mesh>
         {/* ventilation slots */}
-        <mesh position={[0, 0.58, 0.35]}>
-          <boxGeometry args={[1.6, 0.07, 0.02]} />
+        <mesh position={[0, 0.62, 0.37]}>
+          <boxGeometry args={[1.9, 0.08, 0.02]} />
           <meshStandardMaterial color="#101820" />
         </mesh>
-        <mesh position={[0, 0.42, 0.35]}>
-          <boxGeometry args={[1.6, 0.07, 0.02]} />
+        <mesh position={[0, 0.44, 0.37]}>
+          <boxGeometry args={[1.9, 0.08, 0.02]} />
           <meshStandardMaterial color="#101820" />
         </mesh>
         {/* screen */}
-        <mesh position={[0, -0.14, 0.36]}>
-          <planeGeometry args={[2.15, 1.28]} />
+        <mesh position={[0, -0.14, 0.38]}>
+          <planeGeometry args={[2.55, 1.5]} />
           <meshStandardMaterial
             ref={screenMat}
             color="#02060a"
@@ -543,28 +569,28 @@ function ContactTerminal({ onOpen }: { onOpen: () => void }) {
             roughness={0.5}
           />
         </mesh>
-        <Text position={[0, 0.38, 0.42]} fontSize={0.075} font="/fonts/JetBrainsMono-Regular.ttf" color="#c9ffef" maxWidth={2.0} anchorX="left">
+        <Text position={[-1.1, 0.38, 0.44]} fontSize={0.12} font="/fonts/JetBrainsMono-Regular.ttf" color="#c9ffef" maxWidth={2.35} anchorX="left">
           {"> init jj.portfolio"}
         </Text>
-        <Text position={[0, 0.24, 0.42]} fontSize={0.075} font="/fonts/JetBrainsMono-Regular.ttf" color="#9fd9c2" anchorX="left">
+        <Text position={[-1.1, 0.18, 0.44]} fontSize={0.12} font="/fonts/JetBrainsMono-Regular.ttf" color="#9fd9c2" anchorX="left">
           {"-> user: jj / pass: **********"}
         </Text>
-        <Text position={[0, 0.1, 0.42]} fontSize={0.075} font="/fonts/JetBrainsMono-Regular.ttf" color="#9fd9c2" anchorX="left">
+        <Text position={[-1.1, -0.02, 0.44]} fontSize={0.12} font="/fonts/JetBrainsMono-Regular.ttf" color="#9fd9c2" anchorX="left">
           {"-> shell available: /root/contact"}
         </Text>
-        <Text position={[0, -0.08, 0.42]} fontSize={0.075} font="/fonts/JetBrainsMono-Regular.ttf" color="#eafff7" anchorX="left">
+        <Text position={[-1.1, -0.22, 0.44]} fontSize={0.12} font="/fonts/JetBrainsMono-Regular.ttf" color="#eafff7" anchorX="left">
           {"$ ./reach_jj --open-contact"}
         </Text>
-        <Text position={[0, -0.24, 0.42]} fontSize={0.075} font="/fonts/JetBrainsMono-Regular.ttf" color="#6f8c80" anchorX="left">
+        <Text position={[-1.1, -0.42, 0.44]} fontSize={0.12} font="/fonts/JetBrainsMono-Regular.ttf" color="#6f8c80" anchorX="left">
           {"> read /contact/notes"}
         </Text>
-        {/* blinking cursor */}
-        <mesh position={[-0.99, -0.24, 0.44]}>
-          <planeGeometry args={[0.1, 0.17]} />
-          <meshBasicMaterial ref={cursorMat} color={TEAL} transparent opacity={1} />
+        {/* blinking cursor parked after the last line */}
+        <mesh position={[0.86, -0.42, 0.46]}>
+          <planeGeometry args={[0.13, 0.02]} />
+          <meshBasicMaterial ref={cursorMat} color="#2bd9a0" transparent opacity={1} />
         </mesh>
       </group>
-      <Text position={[0, -1.75, 0]} fontSize={0.09} font="/fonts/JetBrainsMono-Regular.ttf" color="#38e0a8" anchorX="center">
+      <Text position={[0, -1.75, 0]} fontSize={0.13} font="/fonts/JetBrainsMono-Regular.ttf" color="#38e0a8" anchorX="center">
         TERMINAL // 127.0.0.1
       </Text>
     </group>
@@ -581,17 +607,19 @@ function StationContent({
   lowPower,
   onOpenProject,
   onOpenContact,
+  onHover,
 }: {
   visited: number[];
   lowPower: boolean;
   onOpenProject: (p: Project) => void;
   onOpenContact: () => void;
+  onHover: (h: HoverInfo) => void;
 }) {
   return (
     <group>
       {visited.includes(1) && <ServerCore lowPower={lowPower} />}
-      {visited.includes(2) && <ProjectRack onOpen={onOpenProject} />}
-      {visited.includes(3) && <CertRack />}
+      {visited.includes(2) && <ProjectRack onOpen={onOpenProject} onHover={onHover} />}
+      {visited.includes(3) && <CertRack onHover={onHover} />}
       {visited.includes(4) && <ContactTerminal onOpen={onOpenContact} />}
       <Room key="room" />
       {!lowPower && <ParticleStream count={1100} />}
@@ -606,12 +634,12 @@ function StationContent({
 const pill: React.CSSProperties = {
   position: "fixed",
   zIndex: 30,
-  padding: "6px 14px",
+  padding: "8px 16px",
   borderRadius: 9999,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(10,12,20,0.6)",
-  color: "rgba(255,255,255,0.85)",
-  fontSize: 12,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(10,12,20,0.65)",
+  color: "rgba(255,255,255,0.9)",
+  fontSize: 14,
   fontFamily: MONO,
   backdropFilter: "blur(6px)",
   pointerEvents: "none",
@@ -622,31 +650,75 @@ const navBtn: React.CSSProperties = {
   zIndex: 40,
   top: "50%",
   transform: "translateY(-50%)",
-  width: 48,
-  height: 48,
+  width: 56,
+  height: 56,
   borderRadius: "50%",
-  border: "1px solid rgba(255,255,255,0.15)",
-  background: "rgba(10,12,20,0.55)",
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(10,12,20,0.6)",
   color: "#fff",
   cursor: "pointer",
   backdropFilter: "blur(6px)",
-  opacity: 0.7,
+  opacity: 0.75,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
 };
+
+/** Crisp 2D "focus dock" at the bottom of the screen: the 3D world stays
+ * atmospheric, but the text that matters is always readable. */
+function FocusDock({ hover }: { hover: HoverInfo }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: "50%",
+        transform: "translateX(-50%)",
+        bottom: 92,
+        zIndex: 30,
+        maxWidth: "min(600px, calc(100vw - 40px))",
+        textAlign: "center",
+        pointerEvents: "none",
+        transition: "opacity 0.2s ease",
+        opacity: hover ? 1 : 0,
+        visibility: hover ? "visible" : "hidden",
+      }}
+    >
+      {hover?.kind === "project" && (
+        <>
+          <div style={{ fontFamily: MONO, fontSize: 12, color: AMBER, letterSpacing: "0.08em" }}>
+            {hover.project.featured ? "> FEATURED VOLUME" : "> VOLUME ATTACHED"} · CLICK SCREEN TO OPEN
+          </div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: "#f5f7f8", marginTop: 4 }}>{hover.project.title}</div>
+          <div style={{ fontFamily: MONO, fontSize: 15, color: TEAL, marginTop: 2 }}>{hover.project.subtitle}</div>
+        </>
+      )}
+      {hover?.kind === "cert" && (
+        <>
+          <div style={{ fontFamily: MONO, fontSize: 12, color: hover.cert.status === "in-progress" ? AMBER : "#6f8c96", letterSpacing: "0.08em" }}>
+            {hover.cert.status === "in-progress" ? `> IN PROGRESS · ${hover.cert.progress}%` : "> PLANNED"}
+          </div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: "#f5f7f8", marginTop: 4 }}>{hover.cert.name}</div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function OverlayShell({
   station,
   goPrev,
   goNext,
   lowPower,
+  hover,
 }: {
   station: StationNum;
   goPrev: () => void;
   goNext: () => void;
   lowPower: boolean;
+  hover: HoverInfo;
 }) {
+  const dockLive =
+    (hover?.kind === "project" && station === 2) || (hover?.kind === "cert" && station === 3);
   return (
     <>
       {/* station chip */}
@@ -661,20 +733,20 @@ function OverlayShell({
           left: 18,
           bottom: 74,
           zIndex: 20,
-          maxWidth: 420,
+          maxWidth: "min(460px, calc(100vw - 36px))",
           pointerEvents: "none",
           transition: "opacity 0.35s ease",
           ...(station === 1 ? {} : { opacity: 0, visibility: "hidden" }),
         }}
       >
-        <div style={{ fontSize: 30, fontWeight: 700, letterSpacing: "-0.02em", color: "#f5f7f8" }}>
+        <div style={{ fontSize: "clamp(30px, 5.5vw, 44px)", fontWeight: 700, letterSpacing: "-0.02em", color: "#f5f7f8", lineHeight: 1.05 }}>
           {heroContent.title}
         </div>
-        <div style={{ fontSize: 14, fontFamily: MONO, color: TEAL, marginTop: 4 }}>{heroContent.subtitle}</div>
-        <div style={{ fontSize: 13, fontFamily: MONO, color: AMBER, marginTop: 2 }}>{heroContent.tagline}</div>
-        <div style={{ fontSize: 13, color: "#97a7b5", marginTop: 10, lineHeight: 1.55 }}>{heroContent.description}</div>
-        <div style={{ marginTop: 10, display: "flex", gap: 8, color: "#6f8c96", fontSize: 12, fontFamily: MONO }}>
-          <MapPin size={13} /> {heroContent.location}
+        <div style={{ fontSize: 16, fontFamily: MONO, color: TEAL, marginTop: 6 }}>{heroContent.subtitle}</div>
+        <div style={{ fontSize: 15, fontFamily: MONO, color: AMBER, marginTop: 2 }}>{heroContent.tagline}</div>
+        <div style={{ fontSize: 15, color: "#97a7b5", marginTop: 10, lineHeight: 1.6 }}>{heroContent.description}</div>
+        <div style={{ marginTop: 10, display: "flex", gap: 8, color: "#6f8c96", fontSize: 14, fontFamily: MONO }}>
+          <MapPin size={15} /> {heroContent.location}
         </div>
       </div>
 
@@ -702,11 +774,14 @@ function OverlayShell({
         />
       )}
 
-      <button aria-label="Previous station" onClick={goPrev} style={{ ...navBtn, left: 16 }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}>
-        <ChevronLeft size={22} />
+      {/* hover focus dock (crisp readable project/cert details) */}
+      <FocusDock hover={dockLive ? hover : null} />
+
+      <button aria-label="Previous station" onClick={goPrev} style={{ ...navBtn, left: 16 }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.75")}>
+        <ChevronLeft size={26} />
       </button>
-      <button aria-label="Next station" onClick={goNext} style={{ ...navBtn, right: 16 }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}>
-        <ChevronRight size={22} />
+      <button aria-label="Next station" onClick={goNext} style={{ ...navBtn, right: 16 }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.75")}>
+        <ChevronRight size={26} />
       </button>
       <div style={{ ...pill, bottom: 18, left: "50%", transform: "translateX(-50%)" }}>
         {station} / {STATION_TOTAL}
@@ -722,30 +797,30 @@ const modalShell: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  background: "rgba(2,4,8,0.72)",
-  backdropFilter: "blur(4px)",
-  padding: 20,
+  background: "rgba(2,4,8,0.74)",
+  backdropFilter: "blur(5px)",
+  padding: 24,
 };
 
 const modalPanel: React.CSSProperties = {
   position: "relative",
   width: "100%",
-  maxWidth: 640,
-  maxHeight: "82vh",
+  maxWidth: 700,
+  maxHeight: "84vh",
   overflowY: "auto",
-  background: "rgba(10,13,20,0.96)",
+  background: "rgba(10,13,20,0.97)",
   border: `1px solid rgba(0,161,83,0.35)`,
-  borderRadius: 12,
-  padding: 26,
+  borderRadius: 14,
+  padding: 32,
   color: "#d7e0e6",
-  boxShadow: "0 0 40px rgba(0,161,83,0.12), 0 0 0 1px rgba(255,75,0,0.06)",
+  boxShadow: "0 0 40px rgba(0,161,83,0.14), 0 0 0 1px rgba(255,75,0,0.06)",
 };
 
 function field(label: string, value: ReactNode) {
   return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 11, fontFamily: MONO, color: TEAL, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
-      <div style={{ fontSize: 14, marginTop: 4, lineHeight: 1.6, color: "#c2cdd4" }}>{value}</div>
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 12, fontFamily: MONO, color: TEAL, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 16, marginTop: 5, lineHeight: 1.6, color: "#c2cdd4" }}>{value}</div>
     </div>
   );
 }
@@ -773,29 +848,29 @@ function ProjectModal({ project, onClose }: { project: Project; onClose: () => v
         >
           <X size={20} />
         </button>
-        <div style={{ fontFamily: MONO, fontSize: 11, color: AMBER }}>vol/{project.featured ? "featured" : "std"}</div>
-        <div style={{ fontSize: 24, fontWeight: 700, color: "#f2f6f8", marginTop: 6 }}>{project.title}</div>
-        <div style={{ fontFamily: MONO, fontSize: 13, color: TEAL, marginTop: 2 }}>{project.subtitle}</div>
+        <div style={{ fontFamily: MONO, fontSize: 12, color: AMBER }}>vol/{project.featured ? "featured" : "std"}</div>
+        <div style={{ fontSize: 28, fontWeight: 700, color: "#f2f6f8", marginTop: 6 }}>{project.title}</div>
+        <div style={{ fontFamily: MONO, fontSize: 15, color: TEAL, marginTop: 3 }}>{project.subtitle}</div>
         {field("Description", project.description)}
         {field("Problem", project.problem)}
         {field("What JJ did", project.whatJJDid)}
         {field("Result", project.result)}
-        <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 8 }}>
           {project.techStack.map((t) => (
-            <span key={t} style={{ fontFamily: MONO, fontSize: 11, padding: "3px 8px", borderRadius: 9999, border: "1px solid rgba(255,75,0,0.4)", color: "#ffd9c7" }}>
+            <span key={t} style={{ fontFamily: MONO, fontSize: 12.5, padding: "4px 10px", borderRadius: 9999, border: "1px solid rgba(255,75,0,0.4)", color: "#ffd9c7" }}>
               {t}
             </span>
           ))}
         </div>
-        <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
+        <div style={{ marginTop: 22, display: "flex", gap: 12 }}>
           {project.liveUrl && (
             <a href={project.liveUrl} target="_blank" rel="noreferrer" style={{ ...linkBtn, borderColor: "rgba(0,161,83,0.5)", color: "#7ff0c8" }}>
-              <ExternalLink size={14} /> Live
+              <ExternalLink size={16} /> Live
             </a>
           )}
           {project.githubUrl && (
             <a href={project.githubUrl} target="_blank" rel="noreferrer" style={linkBtn}>
-              <GitBranch size={14} /> GitBranch
+              <GitBranch size={16} /> GitBranch
             </a>
           )}
         </div>
@@ -807,11 +882,11 @@ function ProjectModal({ project, onClose }: { project: Project; onClose: () => v
 const linkBtn: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  gap: 6,
+  gap: 8,
   fontFamily: MONO,
-  fontSize: 12,
-  padding: "7px 12px",
-  borderRadius: 8,
+  fontSize: 14,
+  padding: "10px 14px",
+  borderRadius: 9,
   border: "1px solid rgba(255,255,255,0.18)",
   color: "#dbe4ea",
   textDecoration: "none",
@@ -841,35 +916,31 @@ function ContactModal({ onClose }: { onClose: () => void }) {
         >
           <X size={20} />
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: 11, color: TEAL }}>
-          <TerminalSquare size={15} /> /root/contact — transmit
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: 12, color: TEAL }}>
+          <TerminalSquare size={16} /> /root/contact — transmit
         </div>
-        <div style={{ fontSize: 24, fontWeight: 700, color: "#f2f6f8", marginTop: 10 }}>Contact</div>
-        <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ fontSize: 28, fontWeight: 700, color: "#f2f6f8", marginTop: 12 }}>Contact</div>
+        <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
           <a href="mailto:jj@jewellcore.com" style={{ ...linkBtn, justifyContent: "flex-start" }}>
-            <Mail size={15} /> jj@jewellcore.com
+            <Mail size={17} /> jj@jewellcore.com
           </a>
           <a href={`https://${contactInfo.github}`} target="_blank" rel="noreferrer" style={{ ...linkBtn, justifyContent: "flex-start" }}>
-            <GitBranch size={15} /> {contactInfo.github}
+            <GitBranch size={17} /> {contactInfo.github}
           </a>
           <a href={`https://${contactInfo.linkedin}`} target="_blank" rel="noreferrer" style={{ ...linkBtn, justifyContent: "flex-start" }}>
-            <Contact size={15} /> {contactInfo.linkedin}
+            <Contact size={17} /> {contactInfo.linkedin}
           </a>
           <div style={{ ...linkBtn, justifyContent: "flex-start", cursor: "default", opacity: 0.7 }}>
-            <MapPin size={15} /> {contactInfo.location}
+            <MapPin size={17} /> {contactInfo.location}
           </div>
         </div>
-        <div style={{ marginTop: 18, fontFamily: MONO, fontSize: 11, color: "#6f8c96", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 14 }}>
+        <div style={{ marginTop: 20, fontFamily: MONO, fontSize: 12, color: "#6f8c96", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 14 }}>
           resume: ask at jj@jewellcore.com — I&apos;ll send a copy (kept out of the repo on purpose).
         </div>
       </motion.div>
     </motion.div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/* Root component                                                      */
-/* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
 /* Debug aid: when the page is loaded with ?proj=1, project each       */
@@ -892,7 +963,10 @@ function ProjectionReporter() {
     const v = new THREE.Vector3();
     const targets: Record<string, Vec3> = { contact: [0, 1.25, -2.5] };
     projects.forEach((p, i) => {
-      targets[p.title] = [(i - 2) * 2.5, 2.25, -2.3];
+      targets[p.title] = [(i - 2) * MONITOR_SPACING, MONITOR_Y, MONITOR_Z];
+    });
+    certifications.forEach((c, i) => {
+      targets[`cert:${c.name}`] = [0, 3.78 - i * 0.42, -2.5];
     });
     const out: Record<string, [number, number]> = {};
     for (const [k, w] of Object.entries(targets)) {
@@ -909,6 +983,7 @@ export function GridScene() {
   const [visited, setVisited] = useState<number[]>([1]);
   const [selected, setSelected] = useState<Project | null>(null);
   const [showContact, setShowContact] = useState(false);
+  const [hover, setHover] = useState<HoverInfo>(null);
   const lowPower = useLowPower();
 
   // Mirror of `station` for the nav callbacks so they never go stale.
@@ -920,6 +995,7 @@ export function GridScene() {
   const goTo = useCallback((n: number) => {
     const s = Math.min(4, Math.max(1, n)) as StationNum;
     setStation(s);
+    setHover(null);
     setVisited((v) => (v.includes(s) ? v : [...v, s]));
   }, []);
 
@@ -927,6 +1003,7 @@ export function GridScene() {
     const s = stationRef.current;
     const next = (s === 1 ? STATION_TOTAL : s - 1) as StationNum;
     setStation(next);
+    setHover(null);
     setVisited((v) => (v.includes(next) ? v : [...v, next]));
   }, []);
 
@@ -934,6 +1011,7 @@ export function GridScene() {
     const s = stationRef.current;
     const next = (s === STATION_TOTAL ? 1 : s + 1) as StationNum;
     setStation(next);
+    setHover(null);
     setVisited((v) => (v.includes(next) ? v : [...v, next]));
   }, []);
 
@@ -970,12 +1048,34 @@ export function GridScene() {
           lowPower={lowPower}
           onOpenProject={setSelected}
           onOpenContact={() => setShowContact(true)}
+          onHover={setHover}
         />
         <CameraRig station={station} />
         <ProjectionReporter />
+        {!lowPower && (
+          <EffectComposer multisampling={4}>
+            <Bloom intensity={1.15} luminanceThreshold={0.18} luminanceSmoothing={0.85} mipmapBlur radius={0.75} />
+            <Vignette eskil={false} offset={0.28} darkness={0.68} />
+          </EffectComposer>
+        )}
       </Canvas>
 
-      <OverlayShell station={station} goPrev={goPrev} goNext={goNext} lowPower={lowPower} />
+      {/* CRT scanlines (always) + vignette on low-power (where bloom is off) */}
+      <div
+        aria-hidden
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 6,
+          pointerEvents: "none",
+          background: lowPower
+            ? "repeating-linear-gradient(0deg, rgba(0,0,0,0.14) 0 1px, transparent 1px 3px), radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,0.55) 100%)"
+            : "repeating-linear-gradient(0deg, rgba(0,0,0,0.14) 0 1px, transparent 1px 3px)",
+          opacity: 0.4,
+        }}
+      />
+
+      <OverlayShell station={station} goPrev={goPrev} goNext={goNext} lowPower={lowPower} hover={hover} />
 
       <AnimatePresence>
         {selected && <ProjectModal key="project" project={selected} onClose={() => setSelected(null)} />}
