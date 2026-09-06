@@ -3,11 +3,10 @@
 import { useRef, useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { ChevronRight } from "lucide-react";
-import Link from "next/link";
 
 import { heroContent } from "../lib/data";
 
-export function StationEntry() {
+export function StationEntry({ onNavigate }: { onNavigate?: (n: number) => void }) {
   const [showDetail, setShowDetail] = useState(false);
 
   return (
@@ -37,17 +36,23 @@ export function StationEntry() {
       </p>
 
       <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
-        <Link href="#projects" 
-          className="relative inline-flex items-center gap-2 rounded-lg border border-border bg-background px-8 py-3 text-sm font-medium hover:bg-muted transition-colors">
+        <button
+          type="button"
+          onClick={() => onNavigate?.(2)}
+          className="relative inline-flex items-center gap-2 rounded-lg border border-border bg-background px-8 py-3 text-sm font-medium hover:bg-muted transition-colors"
+        >
           <span className="gradient-text">View Projects</span>
           <ChevronRight className="h-4 w-4" />
-        </Link>
+        </button>
 
-        <Link href="#certifications" 
-          className="relative inline-flex items-center gap-2 rounded-lg border border-border bg-background px-8 py-3 text-sm font-medium hover:bg-muted transition-colors">
+        <button
+          type="button"
+          onClick={() => onNavigate?.(3)}
+          className="relative inline-flex items-center gap-2 rounded-lg border border-border bg-background px-8 py-3 text-sm font-medium hover:bg-muted transition-colors"
+        >
           <span className="gradient-text">Certifications</span>
           <ChevronRight className="h-4 w-4" />
-        </Link>
+        </button>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2 text-muted-foreground/50">

@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { StationEntry } from "./station-entry";
 import { StationProjects } from "./station-projects";
@@ -91,6 +92,14 @@ export function GridScene() {
     setStation(n as StationNum);
   }, []);
 
+  const goPrev = useCallback(() => {
+    setStation((s) => (s === 1 ? STATION_TOTAL : s - 1) as StationNum);
+  }, []);
+
+  const goNext = useCallback(() => {
+    setStation((s) => (s === STATION_TOTAL ? 1 : s + 1) as StationNum);
+  }, []);
+
   const lowPower = reducedMotion || isLowPower;
 
   return (
@@ -176,7 +185,7 @@ export function GridScene() {
     >
       {station === 1 && (
         <div style={{ pointerEvents: "auto" }}>
-          <StationEntry />
+          <StationEntry onNavigate={handleStationClick} />
         </div>
       )}
       {station === 2 && (
@@ -194,6 +203,78 @@ export function GridScene() {
           <StationContact />
         </div>
       )}
+
+      {/* Station navigation - fixed overlay controls, painted above station
+          content so they stay clickable on every station */}
+      <button
+        aria-label="Previous station"
+        onClick={goPrev}
+        style={{
+          position: "fixed",
+          zIndex: 20,
+          left: 16,
+          top: "50%",
+          transform: "translateY(-50%)",
+          pointerEvents: "auto",
+          width: 48,
+          height: 48,
+          borderRadius: "50%",
+          border: "1px solid rgba(255,255,255,0.15)",
+          background: "rgba(10,12,20,0.55)",
+          color: "#fff",
+          cursor: "pointer",
+          backdropFilter: "blur(6px)",
+          opacity: 0.7,
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}
+      >
+        <ChevronLeft size={22} />
+      </button>
+      <button
+        aria-label="Next station"
+        onClick={goNext}
+        style={{
+          position: "fixed",
+          zIndex: 20,
+          right: 16,
+          top: "50%",
+          transform: "translateY(-50%)",
+          pointerEvents: "auto",
+          width: 48,
+          height: 48,
+          borderRadius: "50%",
+          border: "1px solid rgba(255,255,255,0.15)",
+          background: "rgba(10,12,20,0.55)",
+          color: "#fff",
+          cursor: "pointer",
+          backdropFilter: "blur(6px)",
+          opacity: 0.7,
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}
+      >
+        <ChevronRight size={22} />
+      </button>
+      <div
+        style={{
+          position: "fixed",
+          zIndex: 20,
+          bottom: 16,
+          left: "50%",
+          transform: "translateX(-50%)",
+          padding: "6px 14px",
+          borderRadius: 9999,
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(10,12,20,0.55)",
+          color: "rgba(255,255,255,0.8)",
+          fontSize: 13,
+          fontFamily: "ui-monospace, monospace",
+          backdropFilter: "blur(6px)",
+        }}
+      >
+        {station} / {STATION_TOTAL}
+      </div>
     </div>
     </div>
   );
