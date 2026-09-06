@@ -8,9 +8,11 @@ import { StationProjects } from "./station-projects";
 import { StationCertifications } from "./station-certifications";
 import { StationContact } from "./station-contact";
 
-const ACCENT_AMBER = "oklch(0.70 0.25 40)";
-const ACCENT_TEAL = "oklch(0.60 0.20 160)";
-const CARD_BG_DARK = "oklch(0.15 0.02 260)";
+// three.js Color does not parse oklch() strings, so the design's oklch tokens
+// are converted to their sRGB equivalents (resolved via the browser color pipeline).
+const ACCENT_AMBER = "#ff4b00"; // oklch(0.70 0.25 40)
+const ACCENT_TEAL = "#00a153"; // oklch(0.60 0.20 160)
+const CARD_BG_DARK = "#070b14"; // oklch(0.15 0.02 260)
 
 type StationNum = 1 | 2 | 3 | 4;
 
@@ -92,6 +94,7 @@ export function GridScene() {
   const lowPower = reducedMotion || isLowPower;
 
   return (
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
     <Canvas
       shadows
       camera={{ fov: 60, position: CAMERA_POSITIONS[station] }}
@@ -109,32 +112,32 @@ export function GridScene() {
       {/* Ground plane */}
       <mesh>
         <planeGeometry args={[100, 100]} />
-        <meshStandardMaterial color={lowPower ? "#1a1a2e" : "oklch(0.10 0 260)"} opacity={0.3} transparent />
+        <meshStandardMaterial color={lowPower ? "#1a1a2e" : "#030303"} opacity={0.3} transparent />
       </mesh>
 
       {/* Server room structure - low poly */}
       {/* Back wall */}
       <mesh position={[0, 0, -10]}>
         <boxGeometry args={[30, 0.5, 20]} />
-        <meshStandardMaterial color="oklch(0.12 0.02 260)" roughness={0.3} />
+        <meshStandardMaterial color="#03060d" roughness={0.3} />
       </mesh>
 
       {/* Left wall */}
       <mesh position={[-15, 0, 0]}>
         <boxGeometry args={[0.5, 0.5, 20]} />
-        <meshStandardMaterial color="oklch(0.12 0.02 260)" roughness={0.3} />
+        <meshStandardMaterial color="#03060d" roughness={0.3} />
       </mesh>
 
       {/* Right wall */}
       <mesh position={[27, 0, 0]}>
         <boxGeometry args={[0.5, 0.5, 20]} />
-        <meshStandardMaterial color="oklch(0.12 0.02 260)" roughness={0.3} />
+        <meshStandardMaterial color="#03060d" roughness={0.3} />
       </mesh>
 
       {/* Ceiling */}
       <mesh position={[0, 20, 0]}>
         <boxGeometry args={[30, 0.5, 25]} />
-        <meshStandardMaterial color="oklch(0.12 0.02 260)" roughness={0.3} />
+        <meshStandardMaterial color="#03060d" roughness={0.3} />
       </mesh>
 
       {/* Data stream particles - disabled on reduced motion or low power */}
@@ -158,11 +161,40 @@ export function GridScene() {
         ))}
       </group>
 
-      {/* Station content overlays */}
-      {station === 1 && <StationEntry />}
-      {station === 2 && <StationProjects />}
-      {station === 3 && <StationCertifications />}
-      {station === 4 && <StationContact />}
+      {/* Station content overlays - plain HTML/React overlays must NOT live inside
+          the R3F Canvas tree (R3F only accepts Three.js objects), so they are
+          rendered here, absolutely positioned above the scene */}
     </Canvas>
+
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        overflowY: "auto",
+        pointerEvents: "none",
+      }}
+    >
+      {station === 1 && (
+        <div style={{ pointerEvents: "auto" }}>
+          <StationEntry />
+        </div>
+      )}
+      {station === 2 && (
+        <div style={{ pointerEvents: "auto" }}>
+          <StationProjects />
+        </div>
+      )}
+      {station === 3 && (
+        <div style={{ pointerEvents: "auto" }}>
+          <StationCertifications />
+        </div>
+      )}
+      {station === 4 && (
+        <div style={{ pointerEvents: "auto" }}>
+          <StationContact />
+        </div>
+      )}
+    </div>
+    </div>
   );
 }
